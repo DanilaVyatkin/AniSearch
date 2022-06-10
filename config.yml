@@ -1,0 +1,13 @@
+---
+
+is_debug: true
+listen:
+  type: port
+  bind_io: 0.0.0.0
+  port: 10000
+storage:
+  host: localhost
+  port: 5432
+  database: AniSearch
+  username: postgres
+  password: 0809812003
