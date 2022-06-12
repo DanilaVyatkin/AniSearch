@@ -1,60 +1,76 @@
 package main
 
 import (
+	"MakeAnAPI/internal/cartoon"
+	cartoon2 "MakeAnAPI/internal/cartoon/db"
+	"MakeAnAPI/internal/config"
+	"MakeAnAPI/pkg/client/postgesql"
+	"context"
+	"fmt"
 	"github.com/julienschmidt/httprouter"
 	"log"
+	"net"
 	"net/http"
+	"os"
+	"path"
+	"path/filepath"
+	"time"
 )
-
-func Hello(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
-	w.Write([]byte("hello world"))
-}
 
 func main() {
 	log.Println("create router")
 	router := httprouter.New()
 
-	//cfg := config.GetConfig()
-	//
-	//postgresqlClient, err := postgesql.NewClient(context.TODO(), cfg.Storage, 3)
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
-	//
-	//newDB := db.NewDB(postgresqlClient)
+	cfg := config.GetConfig()
 
-	//newCartoon := cartoon.Cartoon{
-	//	ID:          "cb23c467-9d45-4ec6-87cc-45c2e0fcb05c",
-	//	Name:        "totoro",
-	//	Genre:       "qwe",
-	//	Rating:      "10",
-	//	Description: "totoro",
-	//}
+	log.Println("create new client postgresql")
+	postgreSQLClient, err := postgesql.NewClient(context.TODO(), cfg.Storage, 3)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
 
-	//err = newDB.Create(context.TODO(), &newCartoon)
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
+	log.Println("create repository new db")
+	repository := cartoon2.NewDB(postgreSQLClient)
 
-	//err = newDB.Update(context.TODO(), &newCartoon)
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
-	//
-	//err = newDB.Delete(context.TODO(), "57f86bd2-e7d8-4e44-9aed-9f0cb5c92e4f")
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
-	//
-	//all, err := newDB.FindAll(context.TODO())
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
-	//
-	//for _, name := range all {
-	//	log.Println(name)
-	//}
+	log.Println("find all cartoons")
+	_, err = repository.FindAll(context.TODO())
+	if err != nil {
+		log.Fatalf("Error :%v", err)
+	}
 
-	router.GET("/hello", Hello)
-	log.Fatalln(http.ListenAndServe(":8080", router))
+	log.Println("register cartoon handler")
+	handler := cartoon.NewHandler(repository)
+	handler.Register(router)
+
+	start(router, cfg)
+}
+
+func start(router *httprouter.Router, cfg *config.Config) {
+	var listener net.Listener
+	var listenErr error
+
+	if cfg.Listen.Type == "sock" {
+		appDir, err := filepath.Abs(filepath.Dir(os.Args[0]))
+
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		socketPath := path.Join(appDir, "app.sock")
+		listener, listenErr = net.Listen("unix", socketPath)
+	} else {
+		listener, listenErr = net.Listen("tcp", fmt.Sprintf("%s:%s", cfg.Listen.BindID, cfg.Listen.Port))
+	}
+
+	if listenErr != nil {
+		log.Fatal(listenErr)
+	}
+
+	server := &http.Server{
+		Handler:      router,
+		WriteTimeout: 15 * time.Second,
+		ReadTimeout:  15 * time.Second,
+	}
+
+	log.Fatal(server.Serve(listener))
 }

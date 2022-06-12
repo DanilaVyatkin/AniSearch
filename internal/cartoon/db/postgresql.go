@@ -1,4 +1,4 @@
-package db
+package cartoon
 
 import (
 	"MakeAnAPI/internal/cartoon"
@@ -14,14 +14,26 @@ type db struct {
 	client postgesql.Client
 }
 
-func (d *db) Create(ctx context.Context, cartoon *cartoon.Cartoon) error {
-	q := `
-		INSERT INTO "AniSearch".public.anime (name, genre, rating, description)
-		VALUES ($1, $2, $3, $4) 
-		RETURNING id
-		`
+func NewDB(client postgesql.Client) cartoon.Storage {
+	return &db{
+		client: client,
+	}
+}
 
-	if err := d.client.QueryRow(ctx, q, cartoon.Name, cartoon.Rating, cartoon.Genre, cartoon.Description).
+const (
+	sqlStatementCreate = `INSERT INTO "AniSearch".public.anime (name, genre, rating, description)
+						VALUES ($1, $2, $3, $4) 
+						RETURNING id`
+	sqlStatementFindAll = `SELECT id, name, genre, rating, description FROM "AniSearch".public.anime`
+	sqlStatementFindOne = `SELECT id, name FROM "AniSearch".public.anime WHERE id = $1`
+	sqlStatementUpdate  = `UPDATE "AniSearch".public.anime
+						SET name = $2, genre = $3, rating = $4, description = $5
+						WHERE id = $1`
+	sqlStatementDelete = `DELETE FROM "AniSearch".public.anime WHERE id = $1`
+)
+
+func (d *db) Create(ctx context.Context, cartoon *cartoon.Cartoon) error {
+	if err := d.client.QueryRow(ctx, sqlStatementCreate, cartoon.Name, cartoon.Rating, cartoon.Genre, cartoon.Description).
 		Scan(&cartoon.ID); err != nil {
 		var pgErr *pgconn.PgError
 
@@ -37,23 +49,21 @@ func (d *db) Create(ctx context.Context, cartoon *cartoon.Cartoon) error {
 }
 
 func (d *db) FindAll(ctx context.Context) (c []cartoon.Cartoon, err error) {
-	q := `SELECT id, name, genre, rating, description FROM "AniSearch".public.anime`
-
-	rows, err := d.client.Query(ctx, q)
+	rows, err := d.client.Query(ctx, sqlStatementFindAll)
 	if err != nil {
 		return nil, err
 	}
 
-	name := make([]cartoon.Cartoon, 0)
+	cartoons := make([]cartoon.Cartoon, 0)
 	for rows.Next() {
-		var cart cartoon.Cartoon
+		var cart Cartoon
 
 		err = rows.Scan(&cart.ID, &cart.Name, &cart.Genre, &cart.Rating, &cart.Description)
 		if err != nil {
 			return nil, err
 		}
 
-		name = append(name, cart)
+		cartoons = append(cartoons, cart.ToDomain())
 	}
 
 	err = rows.Err()
@@ -61,14 +71,12 @@ func (d *db) FindAll(ctx context.Context) (c []cartoon.Cartoon, err error) {
 		return nil, err
 	}
 
-	return name, nil
+	return cartoons, nil
 }
 
 func (d *db) FindOne(ctx context.Context, id string) (cartoon.Cartoon, error) {
-	q := `SELECT id, name FROM "AniSearch".public.anime WHERE id = $1`
-
 	var cart cartoon.Cartoon
-	err := d.client.QueryRow(ctx, q, id).Scan(&cart.ID, &cart.Name)
+	err := d.client.QueryRow(ctx, sqlStatementFindOne, id).Scan(&cart.ID, &cart.Name)
 	if err != nil {
 		return cartoon.Cartoon{}, err
 	}
@@ -77,13 +85,7 @@ func (d *db) FindOne(ctx context.Context, id string) (cartoon.Cartoon, error) {
 }
 
 func (d *db) Update(ctx context.Context, cartoon *cartoon.Cartoon) error {
-	sqlStatement := `
-			UPDATE "AniSearch".public.anime
-			SET name = $2, genre = $3, rating = $4, description = $5
-			WHERE id = $1
-			`
-
-	_, err := d.client.Exec(ctx, sqlStatement, cartoon.ID, cartoon.Name, cartoon.Rating, cartoon.Genre,
+	_, err := d.client.Exec(ctx, sqlStatementUpdate, cartoon.ID, cartoon.Name, cartoon.Rating, cartoon.Genre,
 		cartoon.Description)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -101,20 +103,10 @@ func (d *db) Update(ctx context.Context, cartoon *cartoon.Cartoon) error {
 }
 
 func (d *db) Delete(ctx context.Context, id string) error {
-	sqlStatement := `
-			DELETE FROM "AniSearch".public.anime WHERE id = $1
-			`
-
-	_, err := d.client.Exec(ctx, sqlStatement, id)
+	_, err := d.client.Exec(ctx, sqlStatementDelete, id)
 	if err != nil {
 		log.Fatalf("failed delete element, Error: %s", err)
 	}
 
 	return nil
-}
-
-func NewDB(client postgesql.Client) cartoon.Storage {
-	return &db{
-		client: client,
-	}
 }
